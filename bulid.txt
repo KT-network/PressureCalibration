@@ -1,0 +1,26 @@
+nuitka  --standalone --enable-plugin=pyside6 --plugin-enable=numpy --windows-icon-from-ico=D:\Code\Python\DMSoft-pyside\res\icon.ico --windows-disable-console main.py
+
+
+带qml文件的:
+nuitka  --standalone --enable-plugin=pyside6 --windows-icon-from-ico=D:\Code\Python\DMSoft-pyside\res\icon.ico --follow-imports  --noinclude-qt-translations --static-libpython=no --noinclude-dlls=*/QtQuickEffectMaker/* --include-qt-plugins=accessiblebridge,networkaccess,networkinformation,platforminputcontexts,platforms/darwin,qml,qmltooling,scenegraph main.py
+nuitka  --standalone --enable-plugin=pyside6 --windows-icon-from-ico=D:\Code\Python\DMSoft-pyside\res\icon.ico --follow-imports  --noinclude-qt-translations --static-libpython=no --noinclude-dlls=*/QtQuickEffectMaker/* --include-qt-plugins=accessiblebridge,networkaccess,networkinformation,platforminputcontexts,platforms/darwin,qml,qmltooling,scenegraph main.py
+
+简化：
+nuitka  --standalone --enable-plugin=pyside6 --windows-icon-from-ico=D:\Code\Python\DMSoft-pyside\res\icon.ico --follow-imports  --noinclude-qt-translations --noinclude-dlls=*/QtQuickEffectMaker/* --include-qt-plugins=qml,qmltooling --windows-console-mode=disable main.py
+
+新icon
+nuitka  --standalone --enable-plugin=pyside6 --windows-icon-from-ico=D:\Code\Python\DMSoft-pyside\res\icon1.ico --follow-imports  --noinclude-qt-translations --noinclude-dlls=*/QtQuickEffectMaker/* --include-qt-plugins=qml,qmltooling --windows-console-mode=disable DMSoft.py
+
+加速编译（jobs参数：all，1，4）
+nuitka  --standalone --enable-plugin=pyside6 --windows-icon-from-ico="D:\VSCode Projects\Python Projects\DMSoft\res\icon1.ico" --follow-imports  --noinclude-qt-translations --noinclude-dlls=*/QtQuickEffectMaker/* --include-qt-plugins=qml,qmltooling --windows-console-mode=disable --jobs=16 DMSoft.py
+
+删除编译文件
+Haifei:
+nuitka  --standalone --remove-output --enable-plugin=pyside6 --windows-icon-from-ico="D:\VSCode Projects\Python Projects\DMSoft\res\icon1.ico" --follow-imports  --noinclude-qt-translations --noinclude-dlls=*/QtQuickEffectMaker/* --include-qt-plugins=qml,qmltooling --windows-console-mode=disable --jobs=16 DMSoft.py
+
+# PyQtGraph
+pyinstaller --onefile --windowed --icon="D:\VSCode Projects\Python Projects\DMSoft\res\icon1.ico" --name=DMSoft --collect-all PySide6 --collect-all numba --collect-all numpy DMSoft.py
+
+
+Jiakun:
+nuitka  --standalone --remove-output --enable-plugin=pyside6 --windows-icon-from-ico="D:\Code\Python\DMSoft-pyside\res\icon1.ico" --follow-imports  --noinclude-qt-translations --noinclude-dlls=*/QtQuickEffectMaker/* --include-qt-plugins=qml,qmltooling --windows-console-mode=disable --jobs=16 DMSoft.py
