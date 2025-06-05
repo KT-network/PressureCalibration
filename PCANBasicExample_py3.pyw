@@ -52,9 +52,9 @@ IS_WINDOWS = platform.system() == 'Windows'
 DISPLAY_UPDATE_MS = 100
 
 if IS_WINDOWS:
-    FRAME_WIDTH = 760
+    FRAME_WIDTH = 860
     FRAME_HEIGHT = 650
-    GROUPBOX_WIDTH = 745
+    GROUPBOX_WIDTH = 845
     GROUPBOX_HEIGHT = 70
     ENABLE_CAN_FD = True
     ###*#################################################################################

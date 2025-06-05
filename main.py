@@ -12,8 +12,6 @@ if __name__ == '__main__':
         screen = MainViewWindow()
         screen.show()
 
-        # s = DebugWidget()
-        # s.show()
 
         sys.exit(app.exec())
     except IOError as e:
