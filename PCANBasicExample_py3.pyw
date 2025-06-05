@@ -1505,6 +1505,7 @@ class PCANBasicExample(object):
                     items.append(
                         self.FormatChannelName(channel.channel_handle, channel.device_features & FEATURE_FD_CAPABLE))
         print(items)
+
         items.sort()
         self.cbbChannel
         for name in items:
@@ -1523,11 +1524,12 @@ class PCANBasicExample(object):
 
         # Connects a selected PCAN-Basic channel
         #
+        print(self.m_PcanHandle)
         if self.m_IsFD:
             result = self.m_objPCANBasic.InitializeFD(self.m_PcanHandle, bytes(self.m_BitrateTXT.get(), 'utf-8'))
         else:
             result = self.m_objPCANBasic.Initialize(self.m_PcanHandle, baudrate, hwtype, ioport, interrupt)
-
+        print(result)
         if result != PCAN_ERROR_OK:
             if result != PCAN_ERROR_CAUTION:
                 messagebox.showinfo("Error!", self.GetFormatedError(result))
@@ -1539,8 +1541,8 @@ class PCANBasicExample(object):
         else:
             # Prepares the PCAN-Basic's PCAN-Trace file
             #
-            self.ConfigureTraceFile()
-
+            # self.ConfigureTraceFile()
+            pass
         # Sets the connection status of the form
         #
         self.SetConnectionStatus(result == PCAN_ERROR_OK)
@@ -2213,7 +2215,7 @@ class PCANBasicExample(object):
         startIndex = strChannel.index("(") + 1
         strChannel = strChannel[startIndex:startIndex + 3]
         strChannel = strChannel.replace("h", "")
-        self.m_PcanHandle = int(strChannel, 16);
+        self.m_PcanHandle = int(strChannel, 16)
 
         # Determines if the handle belong to a No Plug&Play hardware
         #

@@ -33,6 +33,8 @@ class MainViewWindow(QMainWindow):
         self.table_header_label = [self.tr("AD value"), self.tr("Physical value (10KPa)"), self.tr("Acq AD")]
         self.sensorCalParamList: SensorCalParamList = SensorCalParamList()
         self.drv = pCANBasic.PCANBasic()
+        self.pCanHandle = pCANBasic.PCAN_NONEBUS
+
         self.pcan_scan_list = []
         self.is_connect = False  # 是否连接
         self.is_admin = False  # 是否管理员权限
@@ -102,6 +104,17 @@ class MainViewWindow(QMainWindow):
         lay_pcan_set.addLayout(lay_pcan_init)
 
         self.btn_pcan_init = QPushButton(self.tr("Connect"))
+        self.btn_pcan_init.setStyleSheet('''
+        QPushButton {
+            color: white;
+            background-color: #0078D7;
+            border: none;
+            border-radius: 5px;
+            padding: 5px 10px;
+            font-size: 14px;
+        }
+        ''')
+
         lay_pcan_init.addSpacerItem(QSpacerItem(0, 50))
         lay_pcan_init.addWidget(self.btn_pcan_init)
 
@@ -375,16 +388,87 @@ class MainViewWindow(QMainWindow):
         if result[0] != pCANBasic.PCAN_ERROR_OK:
             pass
         for channel in result[1]:
-            if channel.channel_condition & channel.PCAN_CHANNEL_AVAILABLE:
+            if channel.channel_condition & pCANBasic.PCAN_CHANNEL_AVAILABLE:
                 items.append(self.FormatChannelName(channel.channel_handle,
                                                     channel.device_features & pCANBasic.FEATURE_FD_CAPABLE))
 
         self.combo_pacn_scan.addItems(items)
 
     def on_pcan_init_btn_click(self):
+        if self.is_connect:
+            self.drv.Uninitialize(self.pCanHandle)
+            self.btn_pcan_init.setText(self.tr("Connect"))
+            self.btn_pcan_init.setStyleSheet('''
+            QPushButton {
+                color: white;
+                background-color: #0078D7;
+                border: none;
+                border-radius: 5px;
+                padding: 5px 10px;
+                font-size: 14px;
+            }
+            ''')
+            self.is_connect = False
+            return
+
         if self.combo_pacn_scan.count() == 0:
             QMessageBox.critical(self, self.tr("Error"), self.tr("The PCAN hardware was not found"))
             return
+
+        baud_rate = self.pcan_baud_rate_list.get(self.combo_pcan_baud.currentText())
+        hw_type = pCANBasic.PCAN_TYPE_ISA
+        ioport = 0x100
+        interrupt = 3
+        strChannel = self.combo_pacn_scan.currentText()
+        startIndex = strChannel.index("(") + 1
+        strChannel = strChannel[startIndex:startIndex + 3]
+        strChannel = strChannel.replace("h", "")
+        self.pCanHandle = int(strChannel, 16)
+
+        result = self.drv.Initialize(self.pCanHandle, baud_rate, hw_type, ioport, interrupt)
+        if result != pCANBasic.PCAN_ERROR_OK:
+            if result != pCANBasic.PCAN_ERROR_CAUTION:
+
+                # print(self.GetFormatedError(result))
+                QMessageBox.critical(self, self.tr("Error"), str(self.GetFormatedError(result)))
+            else:
+                QMessageBox.warning(self, self.tr("warning"),
+                                    self.tr("The bitrate being used is different than the given one"))
+                result = pCANBasic.PCAN_ERROR_OK
+        # else:
+        #     iBuffer = 5
+        #
+        #     stsResult = self.drv.SetValue(self.pCanHandle, pCANBasic.PCAN_TRACE_SIZE, iBuffer)
+        #     if stsResult != pCANBasic.PCAN_ERROR_OK:
+        #         self.GetFormatedError(stsResult)
+        #         # self.IncludeTextMessage(self.GetFormatedError(stsResult))
+        #     iBuffer = TRACE_FILE_SINGLE | TRACE_FILE_OVERWRITE
+        self.is_connect = result == pCANBasic.PCAN_ERROR_OK
+        if self.is_connect:
+            self.btn_pcan_init.setText(self.tr("Disconnect"))
+            self.btn_pcan_init.setStyleSheet('''
+            QPushButton {
+                color: white;
+                background-color: #ff7b72;
+                border: none;
+                border-radius: 5px;
+                padding: 5px 10px;
+                font-size: 14px;
+            }
+            ''')
+        else:
+            self.btn_pcan_init.setText(self.tr("Connect"))
+
+            self.btn_pcan_init.setStyleSheet('''
+            QPushButton {
+                color: white;
+                background-color: #0078D7;
+                border: none;
+                border-radius: 5px;
+                padding: 5px 10px;
+                font-size: 14px;
+            }
+            ''')
 
     def on_sensor_cal_add_btn_click(self):
         if len(self.sensorCalParamList.sensorCalParam) == 0:
@@ -410,7 +494,6 @@ class MainViewWindow(QMainWindow):
     def on_edit_id_btn_click(self):
         if not self.is_connect:
             return
-
 
         canMsg = pCANBasic.TPCANMsg()
         # canMsg.ID = self.
@@ -474,6 +557,17 @@ class MainViewWindow(QMainWindow):
             toRet = ('%s: %s (%.2Xh)' % (self.GetDeviceName(devDevice.value), byChannel, handle))
 
         return toRet
+
+    def GetFormatedError(self, error):
+        # Gets the text using the GetErrorText API function
+        # If the function success, the translated error is returned. If it fails,
+        # a text describing the current error is returned.
+        #
+        stsReturn = self.drv.GetErrorText(error, 0)
+        if stsReturn[0] != pCANBasic.PCAN_ERROR_OK:
+            return "An error occurred. Error-code's text ({0:X}h) couldn't be retrieved".format(error)
+        else:
+            return stsReturn[1]
 
     def check_admin(self):
         path = os.path.join(os.getcwd(), ".admin")
