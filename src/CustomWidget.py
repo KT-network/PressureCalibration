@@ -74,8 +74,10 @@ class CustomTableModel(QAbstractTableModel):
             return True
         return False
 
-    def update(self):
+    def update(self,data=None):
         self.beginResetModel()
+        if data !=None:
+            self._data = data
         self.endResetModel()
 
     def removeRow(self, row, /, parent=QModelIndex()):

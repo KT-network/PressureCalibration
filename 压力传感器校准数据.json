@@ -1,0 +1,28 @@
+{
+  "sensorCalParam": [
+    {
+      "adValue": 127,
+      "rangeValue": 0
+    },
+    {
+      "adValue": 47484,
+      "rangeValue": 1000
+    },
+    {
+      "adValue": 86948,
+      "rangeValue": 2000
+    },
+    {
+      "adValue": 124042,
+      "rangeValue": 3000
+    },
+    {
+      "adValue": 164422,
+      "rangeValue": 4000
+    },
+    {
+      "adValue": 199756,
+      "rangeValue": 4500
+    }
+  ]
+}

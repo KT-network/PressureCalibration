@@ -432,7 +432,8 @@ class PCANBasic:
             return TPCANStatus(res)
         except:
             print ("Exception on PCANBasic.Initialize")
-            raise
+            return "Exception on PCANBasic.Write"
+
         
     # Initializes a FD capable PCAN Channel  
     #
@@ -467,7 +468,8 @@ class PCANBasic:
             return TPCANStatus(res)
         except:
             print ("Exception on PCANBasic.InitializeFD")
-            raise
+            return "Exception on PCANBasic.Write"
+
 
     #  Uninitializes one or all PCAN Channels initialized by CAN_Initialize
     #
@@ -492,7 +494,8 @@ class PCANBasic:
             return TPCANStatus(res)
         except:
             print ("Exception on PCANBasic.Uninitialize")
-            raise
+            return "Exception on PCANBasic.Write"
+
 
     #  Resets the receive and transmit queues of the PCAN Channel
     #
@@ -517,7 +520,8 @@ class PCANBasic:
             return TPCANStatus(res)
         except:
             print ("Exception on PCANBasic.Reset")
-            raise
+            return "Exception on PCANBasic.Write"
+
             
     #  Gets the current status of a PCAN Channel
     #
@@ -539,7 +543,8 @@ class PCANBasic:
             return TPCANStatus(res)
         except:
             print ("Exception on PCANBasic.GetStatus")
-            raise
+            return "Exception on PCANBasic.Write"
+
 
     # Reads a CAN message from the receive queue of a PCAN Channel
     #
@@ -571,7 +576,7 @@ class PCANBasic:
             return TPCANStatus(res),msg,timestamp
         except:
             print ("Exception on PCANBasic.Read")
-            raise           
+            return "Exception on PCANBasic.Write"
 
     # Reads a CAN message from the receive queue of a FD capable PCAN Channel
     #
@@ -603,7 +608,7 @@ class PCANBasic:
             return TPCANStatus(res),msg,timestamp
         except:
             print ("Exception on PCANBasic.ReadFD")
-            raise  
+            return "Exception on PCANBasic.Write"
 
     # Transmits a CAN message 
     #
@@ -627,7 +632,7 @@ class PCANBasic:
             return TPCANStatus(res)
         except:
             print ("Exception on PCANBasic.Write")
-            raise
+            return "Exception on PCANBasic.Write"
 
     # Transmits a CAN message over a FD capable PCAN Channel
     #
@@ -651,7 +656,8 @@ class PCANBasic:
             return TPCANStatus(res)
         except:
             print ("Exception on PCANBasic.WriteFD")
-            raise
+            return "Exception on PCANBasic.Write"
+
 
     # Configures the reception filter 
     #
@@ -684,7 +690,8 @@ class PCANBasic:
             return TPCANStatus(res)
         except:
             print ("Exception on PCANBasic.FilterMessages")
-            raise
+            return "Exception on PCANBasic.Write"
+
 
     # Retrieves a PCAN Channel value 
     #
@@ -732,7 +739,7 @@ class PCANBasic:
                 return TPCANStatus(res),mybuffer.value
         except:
             print ("Exception on PCANBasic.GetValue")
-            raise            
+            return "Exception on PCANBasic.Write"
 
     # Returns a descriptive text of a given TPCANStatus
     # error code, in any desired language
@@ -772,7 +779,8 @@ class PCANBasic:
             return TPCANStatus(res)
         except:
             print ("Exception on PCANBasic.SetValue")
-            raise
+            return "Exception on PCANBasic.Write"
+
 
     def GetErrorText(
         self,
@@ -805,8 +813,8 @@ class PCANBasic:
             return TPCANStatus(res),mybuffer.value
         except:
             print ("Exception on PCANBasic.GetErrorText")
-            raise  
-        
+            return "Exception on PCANBasic.Write"
+
     def LookUpChannel(
         self,
         Parameters):
@@ -833,4 +841,4 @@ class PCANBasic:
             return TPCANStatus(res),mybuffer
         except:
             print ("Exception on PCANBasic.LookUpChannel")
-            raise  
+            return "Exception on PCANBasic.Write"

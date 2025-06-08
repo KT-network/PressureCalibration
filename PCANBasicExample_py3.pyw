@@ -163,6 +163,8 @@ class TimerRepeater(object):
                 # launch target in the context of the main loop
                 root.after(1, self._target, *self._args, **self._kwargs)
             else:
+                print("TimerRepeater")
+
                 self._target(*self._args, **self._kwargs)
 
     # Starts the timer
@@ -1426,6 +1428,8 @@ class PCANBasicExample(object):
             theMsg = args[0][0]
             itsTimeStamp = args[0][1]
 
+            # print(list(theMsg.DATA))
+
             newMsg = TPCANMsgFD()
             newMsg.ID = theMsg.ID
             newMsg.DLC = theMsg.LEN
@@ -1996,11 +2000,15 @@ class PCANBasicExample(object):
     def ReadMessage(self):
         # We execute the "Read" function of the PCANBasic
         #
+        # print("ReadMessage")
         result = self.m_objPCANBasic.Read(self.m_PcanHandle)
+        # print("len:",len((result)))
+
 
         if result[0] == PCAN_ERROR_OK:
             # We show the received message
             #
+            # print(result[1:][0])
             self.ProcessMessage(result[1:])
 
         return result[0]
@@ -2027,6 +2035,7 @@ class PCANBasicExample(object):
         #
         while (self.m_CanRead and not (stsResult & PCAN_ERROR_QRCVEMPTY)):
             stsResult = self.ReadMessageFD() if self.m_IsFD else self.ReadMessage()
+            print("ReadMessages",stsResult)
             if stsResult == PCAN_ERROR_ILLOPERATION:
                 break
 
@@ -2354,6 +2363,7 @@ class PCANBasicExample(object):
     def rdbTimer_CheckedChanged(self):
         self.m_CanRead = False
 
+        print(self.btnRelease['state'])
         if self.btnRelease['state'] == DISABLED:
             return
         # Stop the timer, if running
@@ -2372,6 +2382,7 @@ class PCANBasicExample(object):
 
         # According with the kind of reading, a timer, a thread or a button will be enabled
         #
+        print("get:",self.m_ReadingRDB.get())
         if self.m_ReadingRDB.get() == 1:
             self.tmrRead.start()
 

@@ -1,14 +1,28 @@
+import bisect
+import json
 import os
 
-from PySide6.QtCore import Qt, QModelIndex
+from PySide6.QtCore import Qt, QModelIndex, QThread, QTimer
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
                                QPushButton, QLabel, QComboBox, QSpacerItem, QTableView,
-                               QSpinBox, QMessageBox, QCheckBox, QLineEdit)
+                               QSpinBox, QMessageBox, QCheckBox, QLineEdit, QProgressBar, QFileDialog)
+from enum import IntEnum
 
 from .CustomWidget import CustomTableModel, CustomTableAcqButtonDelegate
 from .dataModel import SensorCalParamList, SensorCalParam
 from . import pCANBasic
 from . import tool
+from .work import ReadCanMsgWork
+
+
+class Command(IntEnum):
+    ID = 0x02
+    Freq = 0x1E
+    Save = 0x1D
+    Reset = 0xD3
+    Switch = 0xE0  # 自定义指令，切换功能（0上报物理值，1上报ad值，2进行校准数据保存）
+    Cal = 0xE1
 
 
 class MainViewWindow(QMainWindow):
@@ -27,6 +41,7 @@ class MainViewWindow(QMainWindow):
                            '50 kBit/sec': pCANBasic.PCAN_BAUD_50K, '47,619 kBit/sec': pCANBasic.PCAN_BAUD_47K,
                            '33,333 kBit/sec': pCANBasic.PCAN_BAUD_33K, '20 kBit/sec': pCANBasic.PCAN_BAUD_20K,
                            '10 kBit/sec': pCANBasic.PCAN_BAUD_10K, '5 kBit/sec': pCANBasic.PCAN_BAUD_5K}
+    broadcast_id = 0xFF
 
     def __init__(self):
         super().__init__()
@@ -34,21 +49,51 @@ class MainViewWindow(QMainWindow):
         self.sensorCalParamList: SensorCalParamList = SensorCalParamList()
         self.drv = pCANBasic.PCANBasic()
         self.pCanHandle = pCANBasic.PCAN_NONEBUS
+        self.workThread = None
+        self.worker = None
 
         self.pcan_scan_list = []
         self.is_connect = False  # 是否连接
         self.is_admin = False  # 是否管理员权限
         self.is_broadcast = False  # 是否进行广播写入
-        self.current_can_id = 0  # 当前的Can Id
+        self.is_scan_can_id = False  # 是否点击了扫描canId按钮
+        self.scan_can_id_list = []  # 扫描到的canId列表
+        self.current_can_id = -1  # 当前的Can Id
+        self.current_sensor_ad_value = 0
 
         self.check_admin()
-        print(self.is_admin)
         self.initUi()
         self.initSignalCallback()
+        self.set_enable(False)
 
     def initUi(self):
         self.setWindowTitle(self.tr("PressureCalibration"))
         self.setMinimumSize(700, 450)
+        self.setWindowIcon(QIcon(f'{os.getcwd()}\\logo.ico'))
+
+        self.status_bar_progress = QProgressBar()
+        self.status_bar_progress.setMinimum(0)
+        self.status_bar_progress.setMaximum(100)
+        self.status_bar_progress.setValue(30)
+        self.status_bar_progress.setMaximumHeight(15)
+        self.status_bar_progress.setMaximumWidth(150)
+
+        self.status_bar_progress.setStyleSheet("""
+        QProgressBar {
+            border: 1px solid;
+            text-align: center;
+        }
+        
+        QProgressBar::chunk {
+            background-color: #02913a;
+            width: 50px;
+        }
+        """)
+        self.status_bar_label = QLabel()
+        self.statusBar().addPermanentWidget(self.status_bar_label)
+        self.statusBar().addPermanentWidget(self.status_bar_progress)
+        self.status_bar_progress.hide()
+        self.status_bar_label.hide()
 
         self.widget = QWidget(self)
         self.setCentralWidget(self.widget)
@@ -153,6 +198,9 @@ class MainViewWindow(QMainWindow):
         self.btn_sensor_cal_add = QPushButton(self.tr("Add"))
         self.btn_sensor_cal_minus = QPushButton(self.tr("Remove"))
         self.btn_sensor_cal_sort = QPushButton(self.tr("Sort"))
+        self.btn_load_cal = QPushButton(self.tr("Load"))
+        self.btn_save_cal = QPushButton(self.tr("Save"))
+
         self.btn_sensor_cal_sort.setStyleSheet('''
         QPushButton {
             color: white;
@@ -165,11 +213,15 @@ class MainViewWindow(QMainWindow):
         ''')
         lay_btn_sensor_cal.addWidget(self.btn_sensor_cal_add, 2)
         lay_btn_sensor_cal.addWidget(self.btn_sensor_cal_minus, 2)
+        lay_btn_sensor_cal.addWidget(self.btn_load_cal,1)
+        lay_btn_sensor_cal.addWidget(self.btn_save_cal,1)
+
         lay_btn_sensor_cal.addWidget(self.btn_sensor_cal_sort, 1)
 
         self.table_view_sensor_cal = QTableView()
         lay_sensor_cal.addWidget(self.table_view_sensor_cal)
         # self.table_sensor_cal.verticalHeader().setHidden(True)
+        # self.table_view_sensor_cal.verticalHeader().setFixedHeight(35)
 
         self.table_model = CustomTableModel(self.table_header_label, self.sensorCalParamList)
         self.table_view_sensor_cal.setModel(self.table_model)
@@ -190,11 +242,26 @@ class MainViewWindow(QMainWindow):
         lay_sensor_edit_.addLayout(lay_edit_id)
         lay_edit_id.addWidget(QLabel(self.tr("Can Id")), 2)
 
+        self.combo_edit_id = QComboBox()
+        self.btn_edit_id_scan = QPushButton(self.tr("Scan"))
+        self.btn_edit_id_scan.setStyleSheet('''
+        QPushButton {
+            color: white;
+            background-color: #ffa657;
+            border: none;
+            border-radius: 5px;
+            padding: 3px 5px;
+            font-size: 14px;
+        }
+        ''')
+
         self.spin_edit_id = QSpinBox()
         self.spin_edit_id.setMinimum(1)
         self.spin_edit_id.setMaximum(self.max_spin_edit_id)
         # self.spin_edit_id.setSuffix("    Dec")
-        lay_edit_id.addWidget(self.spin_edit_id, 5)
+        lay_edit_id.addWidget(self.combo_edit_id, 2)
+        lay_edit_id.addWidget(self.btn_edit_id_scan, 1)
+        lay_edit_id.addWidget(self.spin_edit_id, 2)
 
         self.btn_read_id = QPushButton(self.tr("Read"))
         self.btn_read_id.setStyleSheet('''
@@ -218,7 +285,7 @@ class MainViewWindow(QMainWindow):
             font-size: 14px;
         }
         ''')
-        lay_edit_id.addWidget(self.btn_read_id, 1)
+        # lay_edit_id.addWidget(self.btn_read_id, 1)
         lay_edit_id.addWidget(self.btn_edit_id, 1)
 
         # 修改发送间隔时间
@@ -257,7 +324,7 @@ class MainViewWindow(QMainWindow):
             font-size: 14px;
         }
         ''')
-        lay_edit_freq.addWidget(self.btn_read_freq, 1)
+        # lay_edit_freq.addWidget(self.btn_read_freq, 1)
         lay_edit_freq.addWidget(self.btn_edit_freq, 1)
 
         # 修改传感器SN
@@ -299,6 +366,9 @@ class MainViewWindow(QMainWindow):
 
         # ad值
         lay_read_sensor_ad = QVBoxLayout()
+        lay_read_sensor_ad.setAlignment(Qt.AlignmentFlag.AlignTop)
+        lay_read_sensor_ad.addSpacerItem(QSpacerItem(0, 10))
+
         lay_read_data.addLayout(lay_read_sensor_ad)
 
         label_read_ad_value = QLabel(self.tr("AD Value"))
@@ -326,9 +396,12 @@ class MainViewWindow(QMainWindow):
         ''')
         self.text_read_ad_value.setAlignment(Qt.AlignmentFlag.AlignRight)
         lay_read_sensor_ad.addWidget(self.text_read_ad_value)
+        # lay_read_sensor_ad.addSpacerItem(QSpacerItem(0,25))
 
         # 物理值
         lay_read_sensor_val = QVBoxLayout()
+        lay_read_sensor_val.setAlignment(Qt.AlignmentFlag.AlignTop)
+        lay_read_sensor_val.addSpacerItem(QSpacerItem(0, 10))
         lay_read_data.addLayout(lay_read_sensor_val)
 
         label_read_sensor_value = QLabel(self.tr("Pressure Value (10KPa)"))
@@ -358,12 +431,20 @@ class MainViewWindow(QMainWindow):
 
         lay_read_sensor_val.addWidget(self.text_read_sensor_value)
 
+        self.check_btn_read_sensor_value = QCheckBox(self.tr("Read Sensor Pressure Value"))
+        lay_read_sensor_val.addWidget(self.check_btn_read_sensor_value)
+
     def initSignalCallback(self):
         self.btn_pcan_scan.clicked.connect(self.on_pcan_scan_btn_click)
         self.btn_pcan_init.clicked.connect(self.on_pcan_init_btn_click)
         self.btn_sensor_cal_add.clicked.connect(self.on_sensor_cal_add_btn_click)
         self.btn_sensor_cal_minus.clicked.connect(self.on_sensor_cal_minus_btn_click)
         self.btn_sensor_cal_sort.clicked.connect(self.on_sensor_cal_sort_btn_click)
+        self.btn_load_cal.clicked.connect(self.on_load_btn_click)
+        self.btn_save_cal.clicked.connect(self.on_save_btn_click)
+
+        self.combo_edit_id.currentTextChanged.connect(self.on_scan_id_combo_change)
+        self.btn_edit_id_scan.clicked.connect(self.on_edit_id_scan_click)
         self.btn_edit_id.clicked.connect(self.on_edit_id_btn_click)
         self.btn_read_id.clicked.connect(self.on_read_id_btn_click)
         self.btn_edit_freq.clicked.connect(self.on_edit_freq_btn_click)
@@ -372,6 +453,7 @@ class MainViewWindow(QMainWindow):
         self.btn_plant_save.clicked.connect(self.on_plant_save_btn_click)
         self.btn_recover_plant.clicked.connect(self.on_recover_plant_btn_click)
         self.table_btn_delegate_acq.clicked.connect(self.on_table_acq_btn_click)
+        self.check_btn_read_sensor_value.checkStateChanged.connect(self.on_check_box_pressure_value_switch)
 
         if self.is_admin:
             self.check_btn_broadcast.checkStateChanged.connect(
@@ -396,6 +478,8 @@ class MainViewWindow(QMainWindow):
 
     def on_pcan_init_btn_click(self):
         if self.is_connect:
+            self.stopWork()
+            self.set_enable(False)
             self.drv.Uninitialize(self.pCanHandle)
             self.btn_pcan_init.setText(self.tr("Connect"))
             self.btn_pcan_init.setStyleSheet('''
@@ -428,9 +512,8 @@ class MainViewWindow(QMainWindow):
         result = self.drv.Initialize(self.pCanHandle, baud_rate, hw_type, ioport, interrupt)
         if result != pCANBasic.PCAN_ERROR_OK:
             if result != pCANBasic.PCAN_ERROR_CAUTION:
-
-                # print(self.GetFormatedError(result))
-                QMessageBox.critical(self, self.tr("Error"), str(self.GetFormatedError(result)))
+                QMessageBox.critical(self, self.tr("Error"),
+                                     str(self.GetFormatedError(result)) if type(result) == int else result)
             else:
                 QMessageBox.warning(self, self.tr("warning"),
                                     self.tr("The bitrate being used is different than the given one"))
@@ -456,7 +539,10 @@ class MainViewWindow(QMainWindow):
                 font-size: 14px;
             }
             ''')
+
+            self.startWork()
         else:
+            self.stopWork()
             self.btn_pcan_init.setText(self.tr("Connect"))
 
             self.btn_pcan_init.setStyleSheet('''
@@ -487,24 +573,94 @@ class MainViewWindow(QMainWindow):
         if row >= 0:
             self.table_model.removeRow(row)
 
+    def on_save_btn_click(self):
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            caption="保存配置文件",
+            # dir=path,  # 初始目录
+            filter="JSON Files (*.json)"
+        )
+        if file_path:
+            js_data = self.sensorCalParamList.model_dump(mode="json", by_alias=True)
+            js_file = json.dumps(js_data, indent=2)
+            with open(file_path,'w',encoding="utf-8") as f:
+                f.write(js_file)
+
+
+
+    def on_load_btn_click(self):
+        file, _ = QFileDialog.getOpenFileName(parent=self,
+                                              caption="打开配置文件",
+                                              filter="JSON Files (*.json)")
+        if not file:
+            return
+
+        with open(file, "r") as data:
+            read_file =  data.read()
+        js_data = json.loads(read_file)
+        self.sensorCalParamList = SensorCalParamList.model_validate(js_data)
+        self.table_model.update(self.sensorCalParamList)
+
+
+
+
     def on_sensor_cal_sort_btn_click(self):
         self.sensorCalParamList.sort()
         self.table_model.update()
+
+    def on_scan_id_combo_change(self, value):
+        if self.combo_edit_id.count() == 0:
+            self.current_can_id = -1
+            return
+        self.current_can_id = int(value)
+
+    def on_edit_id_scan_click(self):
+        if not self.is_scan_can_id:
+            self.check_btn_read_sensor_value.setChecked(False)
+            self.send_can_frame([Command.Switch, 0x01], True)
+
+            self.is_scan_can_id = True
+            self.scan_can_id_list.clear()
+            QTimer.singleShot(500, lambda: self.on_scan_can_id(1))
+            self.set_status_bar(0, self.tr("Scan Can Id:"))
+
+    def on_scan_can_id(self, num: int):
+        self.set_status_bar(100 / 4 * num, self.tr("Scan Can Id:"))
+
+        if num >= 4:
+            self.is_scan_can_id = False
+            self.combo_edit_id.clear()
+            self.set_status_bar(100 / 4 * num, self.tr("Scan Can Id:"), self.tr("Done"), True)
+            if len(self.scan_can_id_list) > 0:
+                self.combo_edit_id.addItems(self.scan_can_id_list)
+                self.spin_edit_id.setValue(int(self.combo_edit_id.currentText()))
+                self.current_can_id = int(self.combo_edit_id.currentText())
+                return
+            self.current_can_id = -1
+            print("scan can id stop")
+            return
+
+        QTimer.singleShot(500, lambda: self.on_scan_can_id(num + 1))
 
     def on_edit_id_btn_click(self):
         if not self.is_connect:
             return
 
-        canMsg = pCANBasic.TPCANMsg()
-        # canMsg.ID = self.
-
-        pass
+        self.send_can_frame([Command.ID, self.spin_edit_id.value()])
 
     def on_read_id_btn_click(self):
         pass
 
     def on_edit_freq_btn_click(self):
-        pass
+        if not self.is_connect:
+            return
+
+        # if self.current_can_id == -1:
+        #     QMessageBox.critical(self, self.tr("Error"), self.tr("The pressure sensor was not scanned"))
+        #     return
+
+        self.send_can_frame([Command.Freq, int(self.combo_edit_freq.currentText()[:-2])])
 
     def on_read_freq_btn_click(self):
         pass
@@ -516,17 +672,106 @@ class MainViewWindow(QMainWindow):
         pass
 
     def on_cal_save_btn_click(self):
-        pass
+        self.sensorCalParamList.sort()
+        self.table_model.update()
+        QTimer.singleShot(10, lambda: self.on_cal_save_qtimer(0))
+        self.set_status_bar(0, self.tr("Save Cal Data:"))
+
+    def on_cal_save_qtimer(self, index):
+        if index >= len(self.sensorCalParamList.sensorCalParam):
+            result = self.send_can_frame([Command.Switch, 0x02])
+            self.set_status_bar(100 / len(self.sensorCalParamList.sensorCalParam) * index, self.tr("Save Cal Data:"),
+                                self.tr("Done"), True)
+
+            return
+
+        param = self.sensorCalParamList.sensorCalParam[index]
+        data = [0] * 8
+        data[0] = Command.Cal
+        data[1] = index
+        data[2] = param.adValue & 0xFF
+        data[3] = (param.adValue >> 8) & 0xFF
+        data[4] = (param.adValue >> 16) & 0xFF
+        data[5] = (param.adValue >> 24) & 0xFF
+        data[6] = param.rangeValue & 0xFF
+        data[7] = (param.rangeValue >> 8) & 0xFF
+        result = self.send_can_frame(data)
+        if result == pCANBasic.PCAN_ERROR_OK:
+            QTimer.singleShot(10, lambda: self.on_cal_save_qtimer(index + 1))
+            self.set_status_bar(100 / len(self.sensorCalParamList.sensorCalParam) * index, self.tr("Save Cal Data:"))
+        else:
+            self.set_status_bar(100 / len(self.sensorCalParamList.sensorCalParam) * index, self.tr("Save Cal Data:"),
+                                self.tr("Failure"), True, False)
 
     def on_plant_save_btn_click(self):
-        pass
+        self.send_can_frame([Command.Save])
 
     def on_recover_plant_btn_click(self):
-        pass
+        self.send_can_frame([Command.Reset])
+
 
     def on_table_acq_btn_click(self, index: QModelIndex):
-        self.sensorCalParamList.sensorCalParam[index.row()].adValue = 100
+        self.sensorCalParamList.sensorCalParam[index.row()].adValue = self.current_sensor_ad_value
         self.table_model.update()
+
+    def on_check_box_pressure_value_switch(self, value):
+        # self.check_data_base(20)
+
+        if value == Qt.CheckState.Checked:
+            self.send_can_frame([Command.Switch, 0x00], True)
+        else:
+            self.send_can_frame([Command.Switch, 0x01], True)
+            self.sensorCalParamList.sort()
+            self.table_model.update()
+
+
+    def on_worker_result_callback(self, result):
+        if len(result) == 0:
+            return
+
+        for msg in result:
+            if not tool.can_id_check_gression_700(msg[0].ID):
+                continue
+
+            canId = tool.can_id_remove_gression(msg[0].ID)
+            data = msg[0].DATA
+
+            if self.is_scan_can_id and (str(canId) not in self.scan_can_id_list):
+                self.scan_can_id_list.append(str(canId))
+
+            if canId != self.current_can_id:
+                continue
+
+            if self.check_btn_read_sensor_value.isChecked() and msg[0].LEN == 2:
+                sensorValue = tool.remove_gression_high_3(data[0], data[1])
+                self.text_read_sensor_value.setText(str(sensorValue))
+            else:
+                adValue = tool.merge_int8_to_int32(data)
+                self.current_sensor_ad_value = adValue
+                self.text_read_ad_value.setText(str(adValue))
+
+                index_1, index_2 = self.check_data_base(adValue)
+                if index_1 == -1:
+                    self.text_read_sensor_value.setText("Error")
+
+                elif index_1 == index_2:
+                    self.text_read_sensor_value.setText(str(self.sensorCalParamList.sensorCalParam[index_1].rangeValue))
+                else:
+                    # y = m*x+b
+                    x1, x2, y1, y2 = (self.sensorCalParamList.sensorCalParam[index_1].adValue,
+                                      self.sensorCalParamList.sensorCalParam[index_2].adValue,
+                                      self.sensorCalParamList.sensorCalParam[index_1].rangeValue,
+                                      self.sensorCalParamList.sensorCalParam[index_2].rangeValue)
+
+                    m = (y2 - y1) / (x2 - x1)
+                    b = y1 - m * x1
+
+                    value = m * adValue + b
+                    self.text_read_sensor_value.setText(f'%.2f' % value)
+
+            # print(adValue)
+
+        # print(result)
 
     def GetDeviceName(self, handle):
         switcher = {
@@ -569,6 +814,139 @@ class MainViewWindow(QMainWindow):
         else:
             return stsReturn[1]
 
+    def readMsg(self):
+        stsResult = pCANBasic.PCAN_ERROR_OK
+        results = []
+        while self.pCanHandle and not (stsResult & pCANBasic.PCAN_ERROR_QRCVEMPTY):
+            result = self.drv.Read(self.pCanHandle)
+            stsResult = result[0]
+            if result[0] == pCANBasic.PCAN_ERROR_OK:
+                results.append(result[1:])
+            elif result[0] & pCANBasic.PCAN_ERROR_ILLOPERATION:
+                break
+        return results
+
+    def send_can_frame(self, data: list, is_broadcast=False):
+        canMsg = pCANBasic.TPCANMsg()
+        if is_broadcast:
+            canMsg.ID = tool.can_id_generate_gression_300(self.broadcast_id)
+        else:
+            if self.is_broadcast:
+                canMsg.ID = tool.can_id_generate_gression_300(self.broadcast_id)
+            else:
+                if self.current_can_id == -1:
+                    QMessageBox.critical(self, self.tr("Error"), self.tr("The pressure sensor was not scanned"))
+                    return
+                canMsg.ID = tool.can_id_generate_gression_300(self.current_can_id)
+
+        canMsg.LEN = 8
+        canMsg.MSGTYPE = pCANBasic.PCAN_MESSAGE_STANDARD
+
+        for i in range(8):
+            if i < len(data):
+                canMsg.DATA[i] = data[i]
+            else:
+                canMsg.DATA[i] = 0
+
+        result = self.drv.Write(self.pCanHandle, canMsg)
+        if result != pCANBasic.PCAN_ERROR_OK:
+            QMessageBox.critical(self, self.tr("Error"),
+                                 str(self.GetFormatedError(result)) if type(result) == int else result)
+
+        return result
+
+    def set_status_bar(self, progress, info, info_done="", is_done=False, state=True):
+
+        if is_done:
+            self.status_bar_progress.hide()
+            self.status_bar_label.hide()
+            self.statusBar().showMessage(info_done, 1500)
+            return
+        if state:
+            self.status_bar_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid;
+                text-align: center;
+            }
+
+            QProgressBar::chunk {
+                background-color: #02913a;
+                width: 50px;
+            }
+            """)
+        else:
+            self.status_bar_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid;
+                text-align: center;
+            }
+
+            QProgressBar::chunk {
+                background-color: #ff0000;
+                width: 50px;
+            }
+            """)
+
+        self.status_bar_label.setText(info)
+        self.status_bar_progress.setValue(progress)
+        self.status_bar_progress.show()
+        self.status_bar_label.show()
+
+    def check_data_base(self, value):
+        ad_values = [param.adValue for param in self.sensorCalParamList.sensorCalParam]
+        ge_index = bisect.bisect_left(ad_values, value)  # 第一个 >= value 的位置
+        le_index = bisect.bisect_right(ad_values, value) - 1  # 最后一个 <= value 的位置
+        if ge_index >= len(self.sensorCalParamList.sensorCalParam):
+            ge_index = -1
+        if le_index < 0:
+            le_index = -1
+        # print(ad_values[le_index], value, ad_values[ge_index])
+
+        return ge_index, le_index
+
+    def set_enable(self,enable):
+        self.box_sensor_set.setEnabled(enable)
+        self.btn_plant_save.setEnabled(enable)
+        self.btn_cal_save.setEnabled(enable)
+        self.btn_recover_plant.setEnabled(enable)
+
+    def startWork(self):
+
+        if self.workThread and self.workThread.isRunning():
+            return
+        self.set_enable(True)
+        self.send_can_frame([Command.Switch, 0x01], True)
+        self.check_btn_read_sensor_value.setChecked(False)
+        self.current_sensor_ad_value = 0
+        self.current_can_id = -1
+        self.is_scan_can_id = True
+        self.scan_can_id_list.clear()
+        QTimer.singleShot(500, lambda: self.on_scan_can_id(1))
+        self.set_status_bar(0, self.tr("Scan Can Id:"))
+
+        self.workThread = QThread()
+        self.worker = ReadCanMsgWork(self.readMsg)
+        self.worker.moveToThread(self.workThread)
+        self.workThread.started.connect(self.worker.start_work)
+        self.worker.finishedSignal.connect(self.workThread.quit)
+        self.worker.finishedSignal.connect(self.worker.deleteLater)
+        self.workThread.finished.connect(self.workThread.deleteLater)
+        self.workThread.finished.connect(self._work_finished_cleanup)
+
+        self.worker.resultSignal.connect(self.on_worker_result_callback)
+        self.workThread.start()
+
+    def stopWork(self):
+        if self.worker:
+            self.worker.stop_work()
+        if self.workThread:
+            self.workThread.quit()
+            self.workThread.wait()
+
+    def _work_finished_cleanup(self):
+        self.worler = None
+        self.workThread = None
+
     def check_admin(self):
         path = os.path.join(os.getcwd(), ".admin")
         if not os.path.isfile(path):
@@ -576,3 +954,7 @@ class MainViewWindow(QMainWindow):
             return
 
         self.is_admin = True
+
+    def closeEvent(self, event, /):
+        self.stopWork()
+        event.accept()
